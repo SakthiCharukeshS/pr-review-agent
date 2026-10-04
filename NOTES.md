@@ -44,6 +44,7 @@ Agent that reads a GitHub PR diff and posts a code review (style, bugs, security
 - `.adk/` holds the local session DB. Ignored too.
 - `AFC` warning in the terminal logs: ADK internal note, ignored.
 - `adk web` blocks the terminal. Stop it with `Ctrl+C` before running git commands.
+- error 505 : Google servers are busy 
 
 ## 6. Docs reading log
 Docs: https://google.github.io/adk-docs
