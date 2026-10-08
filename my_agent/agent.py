@@ -1,7 +1,9 @@
 import os
+from typing import Optional
 
 import requests
 from google.adk.agents import LlmAgent, ParallelAgent, SequentialAgent
+from google.adk.agents.callback_context import CallbackContext
 from google.adk.tools import ToolContext
 from google.genai import types
 
@@ -15,6 +17,16 @@ RETRY_CONFIG = types.GenerateContentConfig(
 )
 
 
+def require_diff(callback_context: CallbackContext) -> Optional[types.Content]:
+    """Skips an agent when no PR diff was fetched."""
+    if not callback_context.state.get("pr_diff"):
+        return types.Content(
+            role="model",
+            parts=[types.Part(text="Skipped: no diff to review.")],
+        )
+    return None
+
+
 def fetch_pr_diff(repo: str, pr_number: int, tool_context: ToolContext) -> dict:
     """Fetches the diff of a GitHub pull request and saves it for the reviewers.
 
@@ -25,6 +37,7 @@ def fetch_pr_diff(repo: str, pr_number: int, tool_context: ToolContext) -> dict:
     Returns:
         A dict with the status. The diff itself is saved in session state.
     """
+    tool_context.state["pr_diff"] = ""  # clear any old diff first
     url = f"https://api.github.com/repos/{repo}/pulls/{pr_number}"
     headers = {"Accept": "application/vnd.github.v3.diff"}
     token = os.environ.get("GITHUB_TOKEN")
@@ -91,6 +104,7 @@ Diff:
 parallel_reviews = ParallelAgent(
     name="parallel_reviews",
     sub_agents=[style_agent, bug_agent, security_agent],
+    before_agent_callback=require_diff,
 )
 
 summarizer = LlmAgent(
@@ -103,6 +117,7 @@ Style review: {style_review}
 Bug review: {bug_review}
 Security review: {security_review}""",
     generate_content_config=RETRY_CONFIG,
+    before_agent_callback=require_diff,
 )
 
 root_agent = SequentialAgent(
