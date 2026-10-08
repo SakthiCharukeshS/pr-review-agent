@@ -1,18 +1,29 @@
 import os
 
 import requests
-from google.adk.agents import Agent
+from google.adk.agents import LlmAgent, ParallelAgent, SequentialAgent
+from google.adk.tools import ToolContext
+from google.genai import types
+
+MODEL = "gemini-3.5-flash"
+
+RETRY_CONFIG = types.GenerateContentConfig(
+    http_options=types.HttpOptions(
+        timeout=60000,  # 60 seconds, in milliseconds
+        retry_options=types.HttpRetryOptions(initial_delay=1, attempts=3),
+    )
+)
 
 
-def get_pr_diff(repo: str, pr_number: int) -> dict:
-    """Fetches the diff (code changes) of a GitHub pull request.
+def fetch_pr_diff(repo: str, pr_number: int, tool_context: ToolContext) -> dict:
+    """Fetches the diff of a GitHub pull request and saves it for the reviewers.
 
     Args:
         repo: Repository in "owner/name" format, e.g. "SakthiCharukeshS/pr-review-agent".
         pr_number: The pull request number.
 
     Returns:
-        A dict with status and the diff text, or an error message.
+        A dict with the status. The diff itself is saved in session state.
     """
     url = f"https://api.github.com/repos/{repo}/pulls/{pr_number}"
     headers = {"Accept": "application/vnd.github.v3.diff"}
@@ -24,18 +35,77 @@ def get_pr_diff(repo: str, pr_number: int) -> dict:
         resp.raise_for_status()
     except requests.RequestException as e:
         return {"status": "error", "message": str(e)}
-    return {"status": "success", "diff": resp.text[:20000]}
+    diff = resp.text[:20000]
+    tool_context.state["pr_diff"] = diff
+    return {"status": "success", "diff_chars": len(diff)}
 
 
-root_agent = Agent(
-    name="root_agent",
-    model="gemini-3.8-flash",
-    description="Reviews GitHub pull requests.",
+fetcher = LlmAgent(
+    name="fetcher",
+    model=MODEL,
     instruction=(
-        "You are a strict senior engineer. The user gives a repo (owner/name) "
-        "and a PR number. Call get_pr_diff to fetch it, then review the diff. "
-        "List problems under: Bugs, Security, Style. Be specific and brief. "
-        "If the tool returns an error, explain it to the user."
+        "The user gives a repo (owner/name) and a PR number. "
+        "Call fetch_pr_diff once. If it succeeds, reply only: Diff fetched. "
+        "If it returns an error, explain the error to the user."
     ),
-    tools=[get_pr_diff],
+    tools=[fetch_pr_diff],
+    generate_content_config=RETRY_CONFIG,
+)
+
+style_agent = LlmAgent(
+    name="style_agent",
+    model=MODEL,
+    instruction="""Review this PR diff for STYLE issues only.
+Max 3 bullet points. Mention the file name for each.
+
+Diff:
+{pr_diff}""",
+    output_key="style_review",
+    generate_content_config=RETRY_CONFIG,
+)
+
+bug_agent = LlmAgent(
+    name="bug_agent",
+    model=MODEL,
+    instruction="""Review this PR diff for BUGS and logic errors only.
+Max 3 bullet points. Mention the file name for each.
+
+Diff:
+{pr_diff}""",
+    output_key="bug_review",
+    generate_content_config=RETRY_CONFIG,
+)
+
+security_agent = LlmAgent(
+    name="security_agent",
+    model=MODEL,
+    instruction="""Review this PR diff for SECURITY issues only.
+Max 3 bullet points. Mention the file name for each.
+
+Diff:
+{pr_diff}""",
+    output_key="security_review",
+    generate_content_config=RETRY_CONFIG,
+)
+
+parallel_reviews = ParallelAgent(
+    name="parallel_reviews",
+    sub_agents=[style_agent, bug_agent, security_agent],
+)
+
+summarizer = LlmAgent(
+    name="summarizer",
+    model=MODEL,
+    instruction="""Combine the three reviews below into one short final PR review.
+Group it under: Bugs, Security, Style. Remove duplicates.
+
+Style review: {style_review}
+Bug review: {bug_review}
+Security review: {security_review}""",
+    generate_content_config=RETRY_CONFIG,
+)
+
+root_agent = SequentialAgent(
+    name="pr_review_pipeline",
+    sub_agents=[fetcher, parallel_reviews, summarizer],
 )
