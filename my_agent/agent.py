@@ -117,6 +117,7 @@ Style review: {style_review}
 Bug review: {bug_review}
 Security review: {security_review}""",
     generate_content_config=RETRY_CONFIG,
+    output_key="final_review",
     before_agent_callback=require_diff,
 )
 
