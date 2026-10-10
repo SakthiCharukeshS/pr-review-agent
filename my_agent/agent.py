@@ -7,12 +7,16 @@ from google.adk.agents.callback_context import CallbackContext
 from google.adk.tools import ToolContext
 from google.genai import types
 
-MODEL = "gemini-3.5-flash"
+MODEL = "gemini-3.6-flash"
 
 RETRY_CONFIG = types.GenerateContentConfig(
     http_options=types.HttpOptions(
-        timeout=60000,  # 60 seconds, in milliseconds
-        retry_options=types.HttpRetryOptions(initial_delay=1, attempts=3),
+        timeout=60000,  # 60 seconds per request, in milliseconds
+        retry_options=types.HttpRetryOptions(
+            attempts=5,        # 1 original try + 4 retries
+            initial_delay=15,  # seconds before the first retry
+            max_delay=60,      # never wait longer than this between retries
+        ),
     )
 )
 

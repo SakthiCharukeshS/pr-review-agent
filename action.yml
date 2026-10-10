@@ -1,0 +1,44 @@
+name: "AI PR Review"
+description: "Reviews pull requests with a multi-agent Google ADK pipeline and posts the review as a PR comment."
+author: "SakthiCharukeshS"
+branding:
+  icon: git-pull-request
+  color: blue
+
+inputs:
+  google_api_key:
+    description: "Your Gemini API key. Store it as a repository secret."
+    required: true
+  github_token:
+    description: "Token used to read the PR and post the comment."
+    required: false
+    default: ${{ github.token }}
+  python_version:
+    description: "Python version to run the reviewer with."
+    required: false
+    default: "3.12"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v6
+      with:
+        python-version: ${{ inputs.python_version }}
+
+    - name: Install dependencies
+      shell: bash
+      run: pip install -r "${{ github.action_path }}/requirements.txt"
+
+    - name: Review the PR and post a comment
+      shell: bash
+      env:
+        GOOGLE_API_KEY: ${{ inputs.google_api_key }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: |
+        if [ -z "$PR_NUMBER" ]; then
+          echo "::error::This action only works on pull_request events."
+          exit 1
+        fi
+        python "${{ github.action_path }}/review.py" "$REPO" "$PR_NUMBER"
