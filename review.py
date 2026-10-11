@@ -17,6 +17,7 @@ from google.genai import types
 
 from my_agent.agent import root_agent
 from my_agent.github_client import post_pr_comment
+from my_agent.redact import redact_secrets
 
 APP_NAME = "pr_review"
 USER_ID = "cli"
@@ -57,6 +58,7 @@ def review_pr(repo: str, pr_number: int, post: bool = True) -> int:
         print(f"No review produced. {reason}", file=sys.stderr)
         return 1
 
+    review = redact_secrets(review)  # never print or post a leaked secret
     print(review)
     if not post:
         return 0

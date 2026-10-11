@@ -6,6 +6,7 @@ from google.adk.agents import LlmAgent, ParallelAgent, SequentialAgent
 from google.adk.agents.callback_context import CallbackContext
 from google.adk.tools import ToolContext
 from google.genai import types
+from .redact import redact_secrets
 
 MODEL = "gemini-3.6-flash"
 
@@ -52,7 +53,7 @@ def fetch_pr_diff(repo: str, pr_number: int, tool_context: ToolContext) -> dict:
         resp.raise_for_status()
     except requests.RequestException as e:
         return {"status": "error", "message": str(e)}
-    diff = resp.text[:20000]
+    diff = redact_secrets(resp.text)[:20000]
     tool_context.state["pr_diff"] = diff
     return {"status": "success", "diff_chars": len(diff)}
 
@@ -97,7 +98,8 @@ security_agent = LlmAgent(
     name="security_agent",
     model=MODEL,
     instruction="""Review this PR diff for SECURITY issues only.
-Max 3 bullet points. Mention the file name for each.
+Max 3 bullet points. Mention the file name for each. 
+Values shown as [REDACTED] are real secrets hidden by a filter. Treat them as hardcoded secrets.
 
 Diff:
 {pr_diff}""",
