@@ -1,74 +1,70 @@
-# NOTES.md: ADK PR Review Agent
+# NOTES.md: what I built and what I learned
 
-> Learning log. Short, factual, updated after every session.
-> Rule: if I can't explain it in 3 lines, I haven't learned it yet.
+> Learning log for the ADK PR review agent. Short and factual.
 
----
+## Environment
+Windows, Python 3.12, google-adk 2.11.0, model gemini-3.6-flash (Gemini API key).
+Venv lives outside the repo at `D:\venv`.
 
-## 1. Project in one line
-Agent that reads a GitHub PR diff and posts a code review (style, bugs, security, summary).
-
-## 2. Environment
-| Item | Value |
-|---|---|
-| OS | Windows |
-| Python | 3.12.10 |
-| ADK version | google-adk 2.11.0 |
-| Model | gemini-3.8-flash (Gemini API / AI Studio key) |
-| Venv location | `D:\venv` (outside repo) |
-| Repo | `D:\pr-review-agent` |
-
-## 3. Commands I actually use
+## Commands I actually use
 | Task | Command |
 |---|---|
 | Activate venv | `D:\venv\Scripts\activate` |
-| Create agent project | `adk create my_agent` |
-| Run in browser | `adk web` (run from the folder that CONTAINS `my_agent/`) |
-| Run in terminal | `adk run my_agent` |
-| Stop server | `Ctrl+C` |
-| Check ADK version | `pip show google-adk` |
-| Git: check ignored files | `git status --ignored` |
+| Go to project (cmd, switches drive) | `cd /d D:\pr-review-agent` |
+| Browser debug UI | `adk web` (run from the folder that CONTAINS `my_agent/`) |
+| Run tests | `python -m pytest -v` |
+| Review a PR from the terminal | `python review.py owner/repo 12 --dry-run` |
+| Check what git will ignore | `git status --ignored` |
 
-## 4. Concepts learned
-### Agent (`root_agent`)
-- **What:** the LLM + instructions + tools, defined in `my_agent/agent.py`.
-- **Rule:** the variable must be named `root_agent`. ADK looks for that name.
-- **Key fields:** `name`, `model`, `description`, `instruction`.
-- **`instruction`** controls behavior. Change it, behavior changes.
+## Concepts I learned
+- **Agent**: LLM + instruction + tools. `root_agent` is the name ADK looks for.
+- **Tool**: a plain Python function. The docstring is read by the AI, so write it well.
+- **State**: `output_key="x"` saves an agent's reply; `{x}` in another instruction reads it.
+  A tool can write state through `ToolContext`.
+- **Workflow agents**: `ParallelAgent` runs agents at the same time (total time = slowest);
+  `SequentialAgent` runs in order. Both are deprecated in ADK 2.x in favour of `Workflow`.
+- **Callbacks**: `before_agent_callback` can return content to skip an agent. I used it as a
+  guard when no diff was fetched.
+- **Runner**: `adk web` is just a UI on top of an API server. `Runner` + a session service
+  runs the same agent from plain Python (that is `review.py`).
+- **Reliability**: timeouts, retries that wait long enough for the rate-limit window, and
+  returning error dicts from tools instead of crashing.
+- **Security**: GitHub tokens with minimum permissions, secrets in `.env` / repo secrets only,
+  redacting secrets before AI sees the diff and before posting, forks get no secrets.
+- **Testing without AI**: fake `requests.get`, fake contexts, and a fake LLM class so tests
+  never use quota.
 
-*(add: Tools, Workflow agents, Sessions/State, Callbacks, Evaluate, Deploy as I learn them)*
+## Gotchas that bit me
+- ADK is 2.x; many tutorials show 1.x. Check the installed version first.
+- cmd: plain `cd` does not change drive. Use `cd /d D:\path`.
+- `adk web` blocks the terminal. `Ctrl+C` before running git commands.
+- 503 UNAVAILABLE = Google overloaded, not my code.
+- 429 has two kinds: per-DAY (wait ~a day or switch model) and per-MINUTE (retries with long
+  delays fix it). Quotas are per model, and a redirected model name can inherit new limits.
+- A 17-minute run was a bad network connection (`httpx.ReadError`). Always set timeouts.
+- LLM-cited line numbers are guesses unless the diff contains them. Real GitHub diffs do.
+- GitHub returns 404 (not 403) for private repos the token cannot read.
+- Fork PRs get no secrets and a read-only token, so the workflow skips them.
+- Old action versions (`checkout@v4`, `setup-python@v5`) run on Node 20, which GitHub is
+  retiring. Use the Node 24 versions.
+- Pushing a file under `.github/workflows` can need extra permission; adding it on the GitHub
+  website worked.
+- Private actions can only be used by other private repos of the same owner (Access setting).
+- Google retires model names. Keep `MODEL` in one place.
 
-## 5. Gotchas (things that bit me)
-- ADK is 2.x. Many tutorials show 1.x. If code from a tutorial breaks, check the version first.
-- `.env` holds the API key. It must stay in `.gitignore`. Verify with `git status --ignored`.
-- `.adk/` holds the local session DB. Ignored too.
-- `AFC` warning in the terminal logs: ADK internal note, ignored.
-- `adk web` blocks the terminal. Stop it with `Ctrl+C` before running git commands.
-- error 505 : Google servers are busy 
+## Docs pages I used
+Get started > Python Quickstart; Models (including the 429 section); LLM Agents;
+Function tools; Parallel agents; State; Callbacks (`before_agent_callback`);
+Runner / sessions; Deploy > Cloud Run (read, not used).
 
-## 6. Docs reading log
-Docs: https://google.github.io/adk-docs
+## Decisions and trade-offs
+- GitHub Action instead of a server: no hosting, no webhook, no billing. Others bring their own key.
+- Posting the comment is plain Python, not an AI tool, so the AI can never write to GitHub itself.
+- Kept the model hard-coded: simpler; others fork and edit.
+- Skipped evals: at 5 requests per minute they would be very slow.
 
-| Date | Page | Status | One-line takeaway |
-|---|---|---|---|
-| 2026-10-03 | Get started > Python Quickstart | done | `adk create` makes the agent, `root_agent` is the only required part |
-| | Agents > Models & Authentication | skim | how to set the API key and pick a model |
-| | Agents > LLM Agents | TODO | |
-| | Tools > Function tools | TODO | |
-| | Workflow agents (Sequential / Parallel) | TODO | |
-| | Sessions & State | TODO | |
-| | Callbacks | TODO | |
-| | Evaluate | TODO | |
-| | Deploy | TODO | |
-
-## 7. Progress log
-- **2026-10-03**: Setup done. Repo created. First agent created with `adk create`. Ran it in `adk web` and got a reply. Pushed to GitHub.
-
-## 8. Next up
-- [ ] Read LLM Agents page. Change `instruction` to "strict senior code reviewer". Test with buggy code.
-- [ ] Read Function tools page. Write `get_pr_diff()` returning a hardcoded diff.
-- [ ] Give the tool to the agent and ask for a review.
-- [ ] Replace the fake diff with the real GitHub API.
-
-## 9. Open questions
-- (write anything confusing here, then ask)
+## If I continue
+1. Fetch the diff in plain Python (6 requests per review down to 4).
+2. Label-gated reviews for fork PRs.
+3. Rebuild with ADK 2.0 `Workflow`.
+4. Eval set with a pass rate.
